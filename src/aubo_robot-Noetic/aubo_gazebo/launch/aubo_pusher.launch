@@ -1,0 +1,36 @@
+<launch>
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(find aubo_gazebo)/worlds/push_ws.xml"/>
+    <arg name="paused" default="true"/>
+  </include>
+
+  <!-- <include file="$(find my_aubo_config)/launch/demo.launch"/> -->
+
+  <param name="robot_description"
+    command="$(find xacro)/xacro '$(find aubo_gazebo)/urdf/aubo_pusher.xacro'"/>
+  
+  <param name="robot_name" value="aubo_i5"/>
+
+  <node
+    name="spawn_model"
+    pkg="gazebo_ros"
+    type="spawn_model"
+    respawn="false" 
+    args="-urdf -model aubo_i5 -param robot_description "
+    output="screen" />
+
+  <rosparam file="$(find aubo_gazebo)/config/aubo_graper.yaml" command="load"/>
+							     
+	<node name="controller_spawner" pkg="controller_manager" type="spawner" respawn="false"
+                                        output="screen" ns="/aubo_i5" args="joint_state_controller
+                                                                            shoulder_joint_position_controller
+                                                                            upperArm_joint_position_controller
+                                                                            foreArm_joint_position_controller
+                                                                            wrist1_joint_position_controller
+                                                                            wrist2_joint_position_controller
+                                                                            wrist3_joint_position_controller
+                                                                            "/>
+
+  <node name="aubo_gazebo_driver" pkg="aubo_driver" type="aubo_gazebo_driver" />
+
+</launch>

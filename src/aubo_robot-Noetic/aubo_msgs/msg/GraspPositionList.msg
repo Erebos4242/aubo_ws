@@ -1,0 +1,1 @@
+GraspPosition[] grasp_position_list

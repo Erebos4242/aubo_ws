@@ -1,0 +1,7 @@
+<launch>
+
+    <node name="dynamic_get_grasp_position" pkg="aubo_gazebo" type="dynamic_get_grasp_position.py" />
+
+    <node name="grasp_box" pkg="aubo_gazebo" type="grasp_box.py" />
+
+</launch>
