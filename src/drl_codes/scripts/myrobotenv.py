@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
+from multiprocessing.connection import wait
+from os import sep
+from re import T
 import sys
 import copy
+from turtle import st
 
 from scipy import rand
 import rospy
@@ -77,7 +81,7 @@ class RobotSim(object):
         self.box_name = 'table_surface'
         self.robot = robot
         self.scene = scene
-        self.move_group = move_group
+        self.arm = move_group
         self.planning_frame = planning_frame
         self.eef_link = eef_link
         self.group_names = group_names
@@ -98,6 +102,7 @@ class RobotSim(object):
         self.y_per_pixel = 0.5 / 541
         self.camera_height = 2.5
         self.lock = threading.RLock()
+        self.reward = 0
 
         """publisher"""
         display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
@@ -257,6 +262,7 @@ class RobotSim(object):
         self.grasp_target.publish(grasp_position)
     
     def step(self, action):
+
         # l = 0.1
         # center_a, center_b = self.get_center()
         # direction = action // 4 * 12
@@ -288,8 +294,6 @@ class RobotSim(object):
         # start_y = self.limit_to_ws('y', start_y)
         # end_x = self.limit_to_ws('x', end_x)
         # end_y = self.limit_to_ws('y', end_y)
-
-
         if action < 5:
             start_x = 0.3 + action * 0.1
             start_y = 0.3
@@ -297,53 +301,36 @@ class RobotSim(object):
             end_y = -0.3
         else:
             start_x = 0.8
-            start_y = 0.4 - 0.1 * action 
+            start_y = -0.3 + 0.1 * (action - 5) 
             end_x = 0.2
             end_y = start_y
-        for _ in range(30):
-            start_time = time()
-            self.push((start_x, start_y), (end_x, end_y))
-            end_time = time()
-            if end_time - start_time > 8:
-                break
-        
-        # self.move_line()
 
-        object_names, object = self.get_model_states()
+        self.push((start_x, start_y), (end_x, end_y))
+        
+        _, object = self.get_model_states()
         for p in object:
             x, y = p
             if x < 0.2 or x > 0.8 or y < -0.3 or y > 0.3:
-                return True, 0
-
-        not_separated_models = set()
-        separate = 0
-        for i in range(len(object)):
-            if_separate = True
-            for j in range(i + 1, len(object)):
-                distance = (object[i][0] - object[j][0]) ** 2 + (object[i][1] - object[j][1]) ** 2
-                if distance > 0.04:
-                    separate += 1
-                else:
-                    if_separate = False
-            if not if_separate:
-                not_separated_models.add(i)
-                not_separated_models.add(j)
+                return True, 0  
         
-        separated_models = set([i for i in range(len(object))]) - not_separated_models
-        for i in separated_models:
-            rospy.wait_for_service('/gazebo/delete_model', timeout=5)
-            self.delete_model(object_names[i])  
-            
-        if separate == len(object) * (len(object) + 1) / 2:
-            return True, separate
+        separate, now_separate = self.sim_grasp()
+        reward = separate - self.reward
+        self.reawrd = now_separate
+
+        _, object = self.get_model_states()
+        if not object:
+            return True, reward
         else:
-            return False, separate
+            return False, reward
+
+    
+        
 
     ######################################################################
     """Control"""
 
     def init_joint_state(self):
-        move_group = self.move_group
+        move_group = self.arm
         joint_goal = move_group.get_current_joint_values()
         joint_goal[0] = self.init_joint[0]
         joint_goal[1] = self.init_joint[1]
@@ -363,7 +350,7 @@ class RobotSim(object):
     def go_to_pose_goal(self, x, y, z, r):
         self.robot_init = False
         print(time(), "go to pose goal(x, y, z, r)", x, y, z, r)
-        move_group = self.move_group
+        move_group = self.arm
         pose_goal = geometry_msgs.msg.Pose()
         pose_goal.position.x = x
         pose_goal.position.y = y
@@ -376,7 +363,7 @@ class RobotSim(object):
         pose_goal.orientation.z = quat[2]
         pose_goal.orientation.w = quat[3]
 
-        current_pose = self.move_group.get_current_pose().pose
+        current_pose = self.arm.get_current_pose().pose
         # if all_close(pose_goal, current_pose, 0.01):
         #     print(time(), "already at pose goal")
         #     return
@@ -421,28 +408,53 @@ class RobotSim(object):
         self.init_joint_state()
 
     def move_line(self):
-        start = geometry_msgs.msg.Pose()
-        end = geometry_msgs.msg.Pose()
+        x1, y1, z1, ox1, oy1, oz1, ow1 = map(float, input().split())
+        x2, y2, z2, ox2, oy2, oz2, ow2 = map(float, input().split())
 
-        start.position.x = 0.3
-        start.position.y = 0.3
-        start.position.z = 1.16
-        start.orientation.y = 1
+        start = Pose()
+        end = Pose()
 
-        end.position.x = 0.7
-        end.position.y = -0.3
-        end.position.z = 1.16
-        end.orientation.y = 1
+        start.position.x = x1
+        start.position.y = y1
+        start.position.z = z1
+        start.orientation.x = ox1
+        start.orientation.y = oy1
+        start.orientation.z = oz1
+        start.orientation.w = ow1
+
+        end.position.x = x2
+        end.position.y = y2
+        end.position.z = z2
+        end.orientation.x = ox2
+        end.orientation.y = oy2
+        end.orientation.z = oz2
+        end.orientation.w = ow2
+
+        fraction = 0.0
+        maxtries = 100
+        attempts = 0 
+        MPos_succ = False
 
         self.print_poses([start, end])
+        self.arm.set_start_state_to_current_state()
 
-        (plan, fraction) = self.move_group.compute_cartesian_path(
-            [start, end],  # waypoints to follow
-            0.01,  # eef_step
-            0.0)  # jump_threshold
-        self.execute_plan(plan)
+        while fraction < 1.0 and attempts < maxtries:
+            (plan, fraction) = self.arm.compute_cartesian_path (
+                                    [start, end],
+                                    0.01,
+                                    0.0,
+                                    True)
+            attempts += 1         
+
+        if fraction == 1.0:
+            self.arm.execute(plan)
+            MPos_succ = True
+            rospy.sleep(0.2)
+        else:
+            rospy.loginfo("Path planning failed")
 
         self.init_joint_state()
+        return MPos_succ
 
     
     def print_poses(self, poses):
@@ -451,7 +463,7 @@ class RobotSim(object):
             p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w)
     
     def simply_goal_pose(self, x, y, z, ox, oy, oz, ow):
-        move_group = self.move_group
+        move_group = self.arm
         pose_goal = geometry_msgs.msg.Pose()
 
         pose_goal.position.x = x
@@ -468,34 +480,79 @@ class RobotSim(object):
         move_group.stop()
         move_group.clear_pose_targets()
 
-    def execute_plan(self, plan):
-        move_group = self.move_group
-        move_group.execute(plan, wait=True)
+    def go_to_start_point(self, p):
+        self.arm.set_pose_target(p)
+        plan = self.arm.go(wait=True)
+        self.arm.stop()
+        self.arm.clear_pose_targets()
 
     def push(self, s, e):
-        start = geometry_msgs.msg.Pose()
-        end = geometry_msgs.msg.Pose()
+        start = Pose()
+        end = Pose()
+
+        self.arm.set_goal_position_tolerance(0.001)
+        self.arm.set_goal_orientation_tolerance(0.01)
+        self.arm.set_max_acceleration_scaling_factor(0.8)
+        self.arm.set_max_velocity_scaling_factor(1)
 
         start.position.x = s[0]
         start.position.y = s[1]
         start.position.z = 1.16
-        start.orientation.y = 1
+        start.orientation.x = 1
 
         end.position.x = e[0]
         end.position.y = e[1]
         end.position.z = 1.16
-        end.orientation.y = 1
+        end.orientation.x = 1
+
+        self.go_to_start_point(start)
+
+        fraction = 0.0
+        maxtries = 100
+        attempts = 0 
+        MPos_succ = False
 
         # self.print_poses([start, end])
+        self.arm.set_start_state_to_current_state()
 
-        (plan, fraction) = self.move_group.compute_cartesian_path(
-            [start, end],  # waypoints to follow
-            0.01,  # eef_step
-            0.0)  # jump_threshold
-        
-        self.execute_plan(plan)
+        while fraction < 1.0 and attempts < maxtries:
+            (plan, fraction) = self.arm.compute_cartesian_path (
+                                    [start, end],
+                                    0.01,
+                                    0.0,
+                                    True)
+            attempts += 1         
 
+        if fraction == 1.0:
+            self.arm.execute(plan)
+            MPos_succ = True
+            rospy.sleep(0.2)
+        else:
+            rospy.loginfo("Path planning failed")
         self.init_joint_state()
+        return MPos_succ
+    
+    def sim_grasp(self):
+        object_names, object = self.get_model_states()
+        not_separated_models = set()
+        separate = 0
+        for i in range(len(object)):
+            if_separate = True
+            for j in range(i + 1, len(object)):
+                distance = (object[i][0] - object[j][0]) ** 2 + (object[i][1] - object[j][1]) ** 2
+                if distance > 0.04:
+                    separate += 1
+                else:
+                    if_separate = False
+            if not if_separate:
+                not_separated_models.add(i)
+                not_separated_models.add(j)
+        
+        separated_models = set([i for i in range(len(object))]) - not_separated_models
+        for i in separated_models:
+            rospy.wait_for_service('/gazebo/delete_model', timeout=5)
+            self.delete_model(object_names[i])
+        return separate, separate - (len(object) - 1) * len(separated_models)
 
     ######################################################################
     """Robot Environment"""
@@ -506,7 +563,7 @@ class RobotSim(object):
 
         rospy.sleep(1)
         box_pose = geometry_msgs.msg.PoseStamped()
-        box_pose.header.frame_id = self.move_group.get_planning_frame()
+        box_pose.header.frame_id = self.arm.get_planning_frame()
         box_pose.pose.orientation.w = 0
         box_pose.pose.orientation.x = 1.0
         box_pose.pose.orientation.y = 0
@@ -525,6 +582,7 @@ class RobotSim(object):
         for i in object_names:
             self.delete_model(i)
         self.object_spwan()
+        _, self.reward = self.sim_grasp()
     
     def set_model_state(self, model_name):
         rospy.wait_for_service('/gazebo/set_model_state', timeout=5)
@@ -612,16 +670,27 @@ class RobotSim(object):
                 value = 0.3
         return value
 
+
 def main():
     sim = RobotSim()
-    # sim.go_to_pose_goal(float(sys.argv[1]), float(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4]))
-    # while True:
-    #     print("send=======================================")
-    #     sim.place()
-    # # rospy.sleep(5)
-    # sim.go_to_joint_state()
-    rospy.spin()
-
+    func = int(sys.argv[1])
+    if func == 0:
+      sim.go_to_joint_state()
+    elif func == 1:
+      sim.simply_goal_pose(float(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4]),
+       float(sys.argv[5]), float(sys.argv[6]), float(sys.argv[7]), float(sys.argv[8]))
+    elif func == 2:
+      sim.grasp(float(sys.argv[2]))
+    elif func == 3:
+      sim.step(int(sys.argv[2]))
+    elif func == 4:
+      sim.move_line()
+    elif func == 5:
+      sim.reset()
+    elif func == 6:
+        for i in range(10):
+            print(i)
+            sim.step(i)
 
 if __name__ == "__main__":
     main()

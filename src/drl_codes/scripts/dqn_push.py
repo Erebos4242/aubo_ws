@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-import torchvision.transforms as T
+import torchvision.transforms as torch_tran
 from myrobotenv import *
 import time
 
@@ -81,8 +81,8 @@ class DQN(nn.Module):
         return self.head(x.view(x.size(0), -1))
 
 
-resize = T.Compose([T.ToPILImage(),
-                    T.ToTensor()])
+resize = torch_tran.Compose([torch_tran.ToPILImage(),
+                    torch_tran.ToTensor()])
 
 def get_screen():
     _, image = env.get_img()
@@ -273,6 +273,7 @@ for i_episode in range(num_episodes):
         action = select_action(state)
         done, reward = env.step(action.item())
         print(f'action: {action.item()}, reward: {reward}')
+
         reward = torch.tensor([reward], device=device)
         
         # Observe new state

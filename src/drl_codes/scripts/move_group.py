@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from multiprocessing.connection import wait
 import sys
 import copy
 import rospy
@@ -8,6 +9,10 @@ import geometry_msgs.msg
 from math import pi
 from std_msgs.msg import String
 from moveit_commander.conversions import pose_to_list
+import random
+import time
+from geometry_msgs.msg import PoseStamped, Pose
+from copy import deepcopy
 ## END_SUB_TUTORIAL
 
 
@@ -101,6 +106,7 @@ class MoveGroupPythonIntefaceTutorial(object):
     self.planning_frame = planning_frame
     self.eef_link = eef_link
     self.group_names = group_names
+    self.init_joint = [1.571, 0, 0, 0, 0, 0]
 
 
   def go_to_joint_state(self):
@@ -180,15 +186,134 @@ class MoveGroupPythonIntefaceTutorial(object):
     current_pose = self.move_group.get_current_pose().pose
     return all_close(pose_goal, current_pose, 0.01)
 
+  def init_joint_state(self):
+    move_group = self.move_group
+    joint_goal = move_group.get_current_joint_values()
+    joint_goal[0] = self.init_joint[0]
+    joint_goal[1] = self.init_joint[1]
+    joint_goal[2] = self.init_joint[2]
+    joint_goal[3] = self.init_joint[3]
+    joint_goal[4] = self.init_joint[4]
+    joint_goal[5] = self.init_joint[5]
+    current_joints = move_group.get_current_joint_values()
+    # if all_close(joint_goal, current_joints, 0.01):
+    #     print(time(), "already init")
+    #     return
+    move_group.go(joint_goal, wait=True)
+    move_group.stop()
+    self.robot_init = True
 
-def main():
-  try: 
-    tutorial = MoveGroupPythonIntefaceTutorial()
-    tutorial.go_to_pose_goal()
-  except rospy.ROSInterruptException:
-    return
-  except KeyboardInterrupt:
-    return
+  def Moveit_pose(self,*pose):   
+        # 设置机器人终端的目标位置
+        # 姿态使用四元数描述，基于base_link坐标系                                   
+        target_pose = PoseStamped()
+        target_pose.header.frame_id = 'world'
+        target_pose.header.stamp = rospy.Time.now()  #记录此时的时间（时间戳） 
+        target_pose.pose.position.x = 0.121530
+        target_pose.pose.position.y = -0.465707
+        target_pose.pose.position.z = 0.509740
+        target_pose.pose.orientation.x = 1
+        target_pose.pose.orientation.y = 0
+        target_pose.pose.orientation.z = 0
+        target_pose.pose.orientation.w = 0
+        # 设置机械臂终端运动的目标位姿
+        self.move_group.set_pose_target(target_pose, 'wrist3_Link')
+        # 初始化路点列表
+        waypoints = []
+        # 将初始位姿加入路点列表
+        waypoints.append(target_pose.pose)
+        wpose = deepcopy(target_pose.pose)
+        # 计算每次移动后的运动坐标，放置在运动列表中保存下来。
+        wpose.position.x = self.pose1[0]
+        wpose.position.y = self.pose1[1]
+        wpose.position.z = self.pose1[2]
+        waypoints.append(deepcopy(wpose))
+        wpose.position.x = self.pose2[0]
+        wpose.position.y = self.pose2[1]
+        wpose.position.z = self.pose2[2]
+        waypoints.append(deepcopy(wpose))
+        
+        # 笛卡尔空间下的路径规划  
+        fraction = 0.0   #路径规划覆盖率
+        maxtries = 100   #最大尝试规划次数
+        attempts = 0     #已经尝试规划次数
+        # 设置机器臂当前的状态作为运动初始状态
+        self.move_group.set_start_state_to_current_state()
+        # 尝试规划一条笛卡尔空间下的路径，依次通过所有路点，完成圆弧轨迹
+        while fraction < 1.0 and attempts < maxtries:
+            (plan, fraction) = self.move_group.compute_cartesian_path (
+                                    waypoints,   # waypoint poses，路点列表
+                                    0.01,        # eef_step，终端步进值
+                                    0.0,         # jump_threshold，跳跃阈值
+                                    True)        # avoid_collisions，避障规划
+            # 尝试次数累加
+            attempts += 1
+            # 打印运动规划进程
+            if attempts % 10 == 0:
+                rospy.loginfo("Still trying after " + str(attempts) + " attempts...")            
+        # 如果路径规划成功（覆盖率100%）,则开始控制机械臂运动
+        if fraction == 1.0:
+            rospy.loginfo("Path computed successfully. Moving the arm.")
+            self.move_group.execute(plan)
+        # 如果路径规划失败，则打印失败信息
+        else:
+            rospy.loginfo("Path planning failed with only " + str(fraction) + " success after " + str(maxtries) + " attempts.")  
+        rospy.sleep(1)
+
+  def chose(self, action):
+    if action < 5:
+        start_x = 0.3 + action * 0.1
+        start_y = 0.3
+        end_x = start_x
+        end_y = -0.3
+    else:
+        start_x = 0.8
+        start_y = 0.4 - 0.1 * action 
+        end_x = 0.2
+        end_y = start_y
+    self.pose1 = start_x, start_y, 1.16
+    self.pose2 = end_x, end_y, 1.16
+
+  def move_line(self, s, e):
+    start = geometry_msgs.msg.Pose()
+    end = geometry_msgs.msg.Pose()
+
+    start.position.x = s[0]
+    start.position.y = s[1]
+    start.position.z = 1.16
+    start.orientation.x = 1
+    start.orientation.y = 0
+    start.orientation.z = 0
+    start.orientation.w = 0
+
+    end.position.x = e[0]
+    end.position.y = e[1]
+    end.position.z = 1.16
+    end.orientation.x = 1
+    end.orientation.y = 0
+    end.orientation.z = 0
+    end.orientation.w = 0
+
+
+    # self.print_poses([start, end])
+
+    (plan, fraction) = self.move_group.compute_cartesian_path(
+        [start, end],  # waypoints to follow
+        0.01,  # eef_step
+        0.0)  # jump_threshold
+    
+    self.move_group.execute(plan, wait=True)
+
+    self.init_joint_state()
+
 
 if __name__ == '__main__':
-  main()
+  env = MoveGroupPythonIntefaceTutorial()
+  for i in range(100):
+    stime = time.time()
+    action = random.randint(0, 9)
+    env.chose(action)
+    env.Moveit_pose()
+    etime = time.time()
+    print(f'count: {i}, actions: {action}, time cost: {etime - stime}')
+    rospy.sleep(0.1)

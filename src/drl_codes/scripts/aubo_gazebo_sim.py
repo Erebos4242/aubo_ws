@@ -270,12 +270,12 @@ class RobotSim(object):
     start = geometry_msgs.msg.Pose()
     end = geometry_msgs.msg.Pose()
 
-    start.position.x = 0.3
-    start.position.y = 0.3
+    start.position.x = 0.8
+    start.position.y = -0.3
     start.position.z = 1.16
     start.orientation.y = 1
 
-    end.position.x = 0.7
+    end.position.x = 0.2
     end.position.y = -0.3
     end.position.z = 1.16
     end.orientation.y = 1
@@ -424,8 +424,7 @@ def main():
       plan, fraction = sim.path_plan()
       sim.execute_plan(plan)
     elif func == 4:
-      while True:
-        sim.move_line()
+      sim.move_line()
     elif func == 5:
       sim.reset()
 
