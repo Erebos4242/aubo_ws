@@ -128,7 +128,7 @@ EPS_DECAY = 200
 TARGET_UPDATE = 10
 
 screen_height, screen_width = 360, 360
-n_actions = 10
+n_actions = 30
 
 policy_net = DQN(screen_height, screen_width, n_actions).to(device)
 target_net = DQN(screen_height, screen_width, n_actions).to(device)
@@ -297,6 +297,8 @@ for i_episode in range(num_episodes):
     # Update the target network, copying all weights and biases in DQN
     if i_episode % TARGET_UPDATE == 0:
         target_net.load_state_dict(policy_net.state_dict())
+
+torch.save(target_net.state_dict(), '/home/ljm/data/saved_net/dqt_push/model.txt')
 
 end_time = time.time()
 print(f'time cost: {end_time - start_time} s')

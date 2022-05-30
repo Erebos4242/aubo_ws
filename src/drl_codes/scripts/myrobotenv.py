@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from calendar import day_name
 from multiprocessing.connection import wait
 from os import sep
 from re import T
@@ -262,66 +263,56 @@ class RobotSim(object):
         self.grasp_target.publish(grasp_position)
     
     def step(self, action):
-
-        # l = 0.1
+        l = 10
         # center_a, center_b = self.get_center()
-        # direction = action // 4 * 12
-        # if 0 <= direction <= 90:
-        #     xd, yd = 1, 1
-        # elif 90 < direction <= 180:
-        #     xd, yd = 0, 1
-        # elif 180 < direction <= 270:
-        #     xd, yd = 0, 0
-        # else:
-        #     xd, yd = 1, 0
-        # # end_len = action % 4 - 1
-        # end_len = 3
-        # dx, dy = np.fabs(np.cos(direction)) * l, np.fabs(np.sin(direction)) * l
-        # if xd == 1:
-        #     start_x = center_a - dx * 3
-        #     end_x = center_a + dx * end_len
-        # else:
-        #     start_x = center_a + dx * 3
-        #     end_x = center_a - dx * end_len
-        # if yd == 1:
-        #     start_y = center_b - dy * 3
-        #     end_y = center_b + dy * end_len
-        # else:
-        #     start_y = center_b + dy * 3
-        #     end_y = center_b - dy * end_len
+        center_a, center_b = 0.5, 0
 
-        # start_x = self.limit_to_ws('x', start_x)
-        # start_y = self.limit_to_ws('y', start_y)
-        # end_x = self.limit_to_ws('x', end_x)
-        # end_y = self.limit_to_ws('y', end_y)
-        if action < 5:
-            start_x = 0.3 + action * 0.1
-            start_y = 0.3
-            end_x = start_x
-            end_y = -0.3
+        direction = action * 12
+        if 0 <= direction <= 90:
+            xd, yd = 1, 1
+        elif 90 < direction <= 180:
+            xd, yd = 0, 1
+        elif 180 < direction <= 270:
+            xd, yd = 0, 0
         else:
-            start_x = 0.8
-            start_y = -0.3 + 0.1 * (action - 5) 
-            end_x = 0.2
-            end_y = start_y
+            xd, yd = 1, 0
+
+        dx, dy = np.fabs(np.cos(direction)) * l, np.fabs(np.sin(direction)) * l
+        if xd == 1:
+            start_x = center_a - dx
+            end_x = center_a + dx
+        else:
+            start_x = center_a + dx
+            end_x = center_a - dx
+        if yd == 1:
+            start_y = center_b - dy
+            end_y = center_b + dy
+        else:
+            start_y = center_b + dy
+            end_y = center_b - dy
+
+        start_x = self.limit_to_ws('x', start_x)
+        start_y = self.limit_to_ws('y', start_y)
+        end_x = self.limit_to_ws('x', end_x)
+        end_y = self.limit_to_ws('y', end_y)
 
         self.push((start_x, start_y), (end_x, end_y))
         
-        _, object = self.get_model_states()
-        for p in object:
-            x, y = p
-            if x < 0.2 or x > 0.8 or y < -0.3 or y > 0.3:
-                return True, 0  
+        # _, object = self.get_model_states()
+        # for p in object:
+        #     x, y = p
+        #     if x < 0.2 or x > 0.8 or y < -0.3 or y > 0.3:
+        #         return True, -10
         
-        separate, now_separate = self.sim_grasp()
-        reward = separate - self.reward
-        self.reawrd = now_separate
+        # separate, now_separate = self.sim_grasp()
+        # reward = separate - self.reward
+        # self.reward = now_separate
 
-        _, object = self.get_model_states()
-        if not object:
-            return True, reward
-        else:
-            return False, reward
+        # _, object = self.get_model_states()
+        # if not object:
+        #     return True, reward
+        # else:
+        #     return False, reward
 
     
         
@@ -512,7 +503,7 @@ class RobotSim(object):
         attempts = 0 
         MPos_succ = False
 
-        # self.print_poses([start, end])
+        self.print_poses([start, end])
         self.arm.set_start_state_to_current_state()
 
         while fraction < 1.0 and attempts < maxtries:
@@ -533,13 +524,13 @@ class RobotSim(object):
         return MPos_succ
     
     def sim_grasp(self):
-        object_names, object = self.get_model_states()
+        object_names, objects = self.get_model_states()
         not_separated_models = set()
         separate = 0
-        for i in range(len(object)):
+        for i in range(len(objects)):
             if_separate = True
-            for j in range(i + 1, len(object)):
-                distance = (object[i][0] - object[j][0]) ** 2 + (object[i][1] - object[j][1]) ** 2
+            for j in range(i + 1, len(objects)):
+                distance = (objects[i][0] - objects[j][0]) ** 2 + (objects[i][1] - objects[j][1]) ** 2
                 if distance > 0.04:
                     separate += 1
                 else:
@@ -548,11 +539,24 @@ class RobotSim(object):
                 not_separated_models.add(i)
                 not_separated_models.add(j)
         
-        separated_models = set([i for i in range(len(object))]) - not_separated_models
+        # delete separated models
+        separated_models = set([i for i in range(len(objects))]) - not_separated_models
+        rospy.wait_for_service('/gazebo/delete_model', timeout=5)
         for i in separated_models:
-            rospy.wait_for_service('/gazebo/delete_model', timeout=5)
             self.delete_model(object_names[i])
-        return separate, separate - (len(object) - 1) * len(separated_models)
+
+        # now_separate = separate - len(separated_models) * (len(objects ) - 1)
+        now_separate = 0
+        for i in range(len(objects)):
+            for j in range(i + 1, len(objects)):
+                distance = (objects[i][0] - objects[j][0]) ** 2 + (objects[i][1] - objects[j][1]) ** 2
+                if distance > 0.04:
+                    now_separate += 1
+
+        print(f'objects num: {len(objects)}, grasped objects num: {len(separated_models)},\
+         separate: {separate}, now separate: {now_separate}')
+
+        return separate, now_separate
 
     ######################################################################
     """Robot Environment"""
@@ -573,10 +577,8 @@ class RobotSim(object):
         scene.add_box("table", box_pose, size=(2, 2, 0.01))
 
     def reset(self):
-        # rospy.wait_for_service('/gazebo/reset_world', timeout=5)
-        # self.reset_world()
-        # rospy.sleep(3)
         self.init_joint_state()
+        self.reward = 0
         rospy.wait_for_service('/gazebo/delete_model', timeout=5)
         object_names, _ = self.get_model_states()
         for i in object_names:
@@ -688,8 +690,8 @@ def main():
     elif func == 5:
       sim.reset()
     elif func == 6:
-        for i in range(10):
-            print(i)
+        for i in range(30):
+            print(f"step: {i}======================")
             sim.step(i)
 
 if __name__ == "__main__":
