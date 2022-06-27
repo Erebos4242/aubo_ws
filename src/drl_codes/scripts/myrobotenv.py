@@ -36,6 +36,7 @@ from gazebo_msgs.msg import ModelStates, ModelState
 from std_srvs.srv import Empty
 from gazebo_msgs.srv import DeleteModel, SetModelState, SpawnModel
 from tf.transformations import quaternion_from_euler, euler_from_quaternion
+import torch
 
 
 def all_close(goal, actual, tolerance):
@@ -103,7 +104,6 @@ class RobotSim(object):
         self.y_per_pixel = 0.5 / 541
         self.camera_height = 2.5
         self.lock = threading.RLock()
-        self.reward = 0
 
         """publisher"""
         display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
@@ -222,21 +222,40 @@ class RobotSim(object):
         image = image.astype(np.uint8)
 
         depth_img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        depth_img = cv2.cvtColor(depth_img, cv2.COLOR_RGB2GRAY)
+
 
         return color_img, depth_img
+
+    def get_states(self):
+        channel, width, height = 1, 100, 100
+        _, image = self.get_img()
+        _, image = cv2.threshold(image, 210, 255, cv2.THRESH_BINARY_INV)
+        image = image[:, 140:500]
+        image = image[60: 420]
+        # # cv2.imwrite('/home/ljm/data/temp.png', image)
+
+        image = cv2.resize(image, (width, height), interpolation=cv2.INTER_CUBIC)
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+
+        image = np.array([image])
+        return torch.tensor(image)
     
     def get_model_states(self):
-        states = rospy.wait_for_message('/gazebo/model_states', ModelStates)
-        model_names = states.name
-        object_pos = []
-        object_names = []
-        for i in range(len(model_names)):
-            if model_names[i] not in self.scene_models:
-                x = states.pose[i].position.x
-                y = states.pose[i].position.y
-                object_pos.append((x, y))
-                object_names.append(model_names[i])
-        return object_names, object_pos
+        try:
+            states = rospy.wait_for_message('/gazebo/model_states', ModelStates)
+            model_names = states.name
+            object_pos = []
+            object_names = []
+            for i in range(len(model_names)):
+                if model_names[i] not in self.scene_models:
+                    x = states.pose[i].position.x
+                    y = states.pose[i].position.y
+                    object_pos.append((x, y))
+                    object_names.append(model_names[i])
+            return object_names, object_pos
+        except:
+            pass
     
     def get_center(self):
         object_names, object_pos = self.get_model_states()
@@ -261,58 +280,86 @@ class RobotSim(object):
         index = 0
         grasp_position = data.grasp_position[index: index + 5]
         self.grasp_target.publish(grasp_position)
-    
+
+    def cal_separate(self, objects):
+        not_separated_models = set()
+        separate = 0
+        for i in range(len(objects)):
+            if_separate = True
+            for j in range(i + 1, len(objects)):
+                distance = (objects[i][0] - objects[j][0]) ** 2 + (objects[i][1] - objects[j][1]) ** 2
+                if distance > 0.04:
+                    separate += 1
+                else:
+                    if_separate = False
+            if not if_separate:
+                not_separated_models.add(i)
+                not_separated_models.add(j)
+
+        # delete separated models
+        separated_models = set([i for i in range(len(objects))]) - not_separated_models
+        return separate, separated_models
+
     def step(self, action):
-        l = 10
-        # center_a, center_b = self.get_center()
-        center_a, center_b = 0.5, 0
+        # l = 10
+        # # center_a, center_b = self.get_center()
+        # center_a, center_b = 0.5, 0
+        #
+        # direction = action * 12
+        # if 0 <= direction <= 90:
+        #     xd, yd = 1, 1
+        # elif 90 < direction <= 180:
+        #     xd, yd = 0, 1
+        # elif 180 < direction <= 270:
+        #     xd, yd = 0, 0
+        # else:
+        #     xd, yd = 1, 0
+        #
+        # dx, dy = np.fabs(np.cos(direction)) * l, np.fabs(np.sin(direction)) * l
+        # if xd == 1:
+        #     start_x = center_a - dx
+        #     end_x = center_a + dx
+        # else:
+        #     start_x = center_a + dx
+        #     end_x = center_a - dx
+        # if yd == 1:
+        #     start_y = center_b - dy
+        #     end_y = center_b + dy
+        # else:
+        #     start_y = center_b + dy
+        #     end_y = center_b - dy
+        action = [float(i) for i in action]
+        start_x = action[0]
+        start_y = action[1]
+        end_x = action[2]
+        end_y = action[3]
 
-        direction = action * 12
-        if 0 <= direction <= 90:
-            xd, yd = 1, 1
-        elif 90 < direction <= 180:
-            xd, yd = 0, 1
-        elif 180 < direction <= 270:
-            xd, yd = 0, 0
-        else:
-            xd, yd = 1, 0
-
-        dx, dy = np.fabs(np.cos(direction)) * l, np.fabs(np.sin(direction)) * l
-        if xd == 1:
-            start_x = center_a - dx
-            end_x = center_a + dx
-        else:
-            start_x = center_a + dx
-            end_x = center_a - dx
-        if yd == 1:
-            start_y = center_b - dy
-            end_y = center_b + dy
-        else:
-            start_y = center_b + dy
-            end_y = center_b - dy
-
-        start_x = self.limit_to_ws('x', start_x)
-        start_y = self.limit_to_ws('y', start_y)
-        end_x = self.limit_to_ws('x', end_x)
-        end_y = self.limit_to_ws('y', end_y)
+        _, before_object_states = self.get_model_states()
 
         self.push((start_x, start_y), (end_x, end_y))
-        
-        # _, object = self.get_model_states()
-        # for p in object:
-        #     x, y = p
-        #     if x < 0.2 or x > 0.8 or y < -0.3 or y > 0.3:
-        #         return True, -10
-        
-        # separate, now_separate = self.sim_grasp()
-        # reward = separate - self.reward
-        # self.reward = now_separate
 
-        # _, object = self.get_model_states()
-        # if not object:
-        #     return True, reward
-        # else:
-        #     return False, reward
+        states = self.get_states()
+        after_object_names, after_object_states = self.get_model_states()
+
+        for p in after_object_states:
+            x, y = p
+            if x < 0 or x > 1 or y < -0.5 or y > 0.5:
+                return states, True, 0
+            if x < 0.2 or x > 0.8 or y < -0.3 or y > 0.3:
+                return states, True, -5
+
+        before_separate, _ = self.cal_separate(before_object_states)
+        after_separate, separated_models = self.cal_separate(after_object_states)
+        reward = after_separate - before_separate
+
+        rospy.wait_for_service('/gazebo/delete_model', timeout=5)
+        for i in separated_models:
+            self.delete_model(after_object_names[i])
+
+        if not object:
+            return states, True, reward
+        else:
+            return states, False, reward
 
     
         
@@ -503,7 +550,7 @@ class RobotSim(object):
         attempts = 0 
         MPos_succ = False
 
-        self.print_poses([start, end])
+        # self.print_poses([start, end])
         self.arm.set_start_state_to_current_state()
 
         while fraction < 1.0 and attempts < maxtries:
@@ -546,6 +593,7 @@ class RobotSim(object):
             self.delete_model(object_names[i])
 
         # now_separate = separate - len(separated_models) * (len(objects ) - 1)
+        object_names, objects = self.get_model_states()
         now_separate = 0
         for i in range(len(objects)):
             for j in range(i + 1, len(objects)):
@@ -553,8 +601,8 @@ class RobotSim(object):
                 if distance > 0.04:
                     now_separate += 1
 
-        print(f'objects num: {len(objects)}, grasped objects num: {len(separated_models)},\
-         separate: {separate}, now separate: {now_separate}')
+        # print(f'objects num: {len(objects)}, grasped objects num: {len(separated_models)},\
+        #  separate: {separate}, now separate: {now_separate}')
 
         return separate, now_separate
 
@@ -584,8 +632,14 @@ class RobotSim(object):
         for i in object_names:
             self.delete_model(i)
         self.object_spwan()
-        _, self.reward = self.sim_grasp()
-    
+
+        object_names, object_states = self.get_model_states()
+        after_separate, separated_models = self.cal_separate(object_states)
+        rospy.wait_for_service('/gazebo/delete_model', timeout=5)
+        for i in separated_models:
+            self.delete_model(object_names[i])
+
+
     def set_model_state(self, model_name):
         rospy.wait_for_service('/gazebo/set_model_state', timeout=5)
         state_msg = ModelState()
@@ -599,7 +653,7 @@ class RobotSim(object):
         state_msg.pose.orientation.w = 1
         self.set_state(state_msg)
 
-    def object_spwan(self):
+    def object_spwan(self):         # x in [0.2, 0.8]  y in [-0.3 0.3]
         # initial all objects, and spwan them to the Gazebo 
         rospy.wait_for_service("gazebo/spawn_sdf_model",timeout=5)
 
