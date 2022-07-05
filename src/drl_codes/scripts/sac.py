@@ -233,24 +233,45 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             for i in range(len(obs)):
                 replay_buffer.store(obs[i], act[i], rew[i], obs2[i], done[i])
 
-    def judge_start_point():
-        _, image = env.get_img()
-        print
+    def judge_start_point(x, y):
+        _, image_org = env.get_img()
+        lenth_per_pixel = 0.00186
+        x -= 0.5
+
+        x_pixel = 240 - int(x / lenth_per_pixel)
+        y_pixel = 320 + int(y / lenth_per_pixel)
+        off_set = 6
+
+        image = cv2.cvtColor(image_org, cv2.COLOR_BGR2RGB)
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        _, image = cv2.threshold(image, 210, 255, cv2.THRESH_BINARY_INV)
+
+        # cv2.circle(image, (y_pixel, x_pixel), 10, (255, 255, 255), 1)
+        # cv2.imshow('img', image)
+        # cv2.waitKey(0)
+
+        if image[x_pixel - off_set][y_pixel] == 255 or image[x_pixel + off_set][y_pixel] == 255 or \
+                image[x_pixel][y_pixel - off_set] == 255 or image[x_pixel][y_pixel + off_set] == 255 or \
+                image[x_pixel - 5][y_pixel - 5] == 255 or image[x_pixel + 5][y_pixel + 5] == 255 or \
+                image[x_pixel - 5][y_pixel + 5] == 255 == 255 or image[x_pixel + 5][y_pixel - 5] == 255 == 255:
+            return True
+        else:
+            return False
 
     start_time = time.time()
 
-    num_episodes = 1000
+    num_episodes = 2000
     start_episodes = 100
-    update_after = 50
-    update_every = 15
+    update_after = 100
+    update_every = 30
     # Main loop: collect experience in env and update/log each epoch
     img_count = 0
     load_experience()
 
-    for i_episode in range(num_episodes):
+    for i_episode in range(1, num_episodes):
         print(f'episode: {i_episode}')
         env.reset()
-        for i_step in range(20):
+        for i_step in range(10):
             o = env.get_states()
             # save_states(o, 'before')
             # Until start_steps have elapsed, randomly sample actions
@@ -261,6 +282,9 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             else:
                 x1 = np.random.uniform(0.2, 0.8)
                 y1 = np.random.uniform(-0.3, 0.3)
+                while judge_start_point(x1, y1):
+                    x1 = np.random.uniform(0.2, 0.8)
+                    y1 = np.random.uniform(-0.3, 0.3)
 
                 x2 = np.random.uniform(0.2, 0.8)
                 y2 = np.random.uniform(-0.3, 0.3)
@@ -302,7 +326,7 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         #
         #     # Test the performance of the deterministic version of the agent.
         #     test_agent()
-        if i_episode % 100 == 0:
+        if i_episode % 200 == 0:
             save_experience()
         if i_episode % 200 == 0:
             torch.save(ac_targ.state_dict(), f'/home/ljm/data/saved_net/sac/{i_episode}model.txt')

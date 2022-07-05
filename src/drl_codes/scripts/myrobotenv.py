@@ -233,11 +233,9 @@ class RobotSim(object):
         _, image = cv2.threshold(image, 210, 255, cv2.THRESH_BINARY_INV)
         image = image[:, 140:500]
         image = image[60: 420]
-        # # cv2.imwrite('/home/ljm/data/temp.png', image)
+
 
         image = cv2.resize(image, (width, height), interpolation=cv2.INTER_CUBIC)
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-
         image = np.array([image])
         return torch.tensor(image)
     
@@ -288,7 +286,7 @@ class RobotSim(object):
             if_separate = True
             for j in range(i + 1, len(objects)):
                 distance = (objects[i][0] - objects[j][0]) ** 2 + (objects[i][1] - objects[j][1]) ** 2
-                if distance > 0.04:
+                if distance > 0.022:
                     separate += 1
                 else:
                     if_separate = False
@@ -356,6 +354,7 @@ class RobotSim(object):
         for i in separated_models:
             self.delete_model(after_object_names[i])
 
+        _, object = self.get_model_states()
         if not object:
             return states, True, reward
         else:
@@ -524,6 +523,52 @@ class RobotSim(object):
         self.arm.stop()
         self.arm.clear_pose_targets()
 
+    # def push(self, s, e):
+    #     start = Pose()
+    #     end = Pose()
+
+    #     self.arm.set_goal_position_tolerance(0.001)
+    #     self.arm.set_goal_orientation_tolerance(0.01)
+    #     self.arm.set_max_acceleration_scaling_factor(0.8)
+    #     self.arm.set_max_velocity_scaling_factor(1)
+
+    #     start.position.x = s[0]
+    #     start.position.y = s[1]
+    #     start.position.z = 1.16
+    #     start.orientation.x = 1
+
+    #     end.position.x = e[0]
+    #     end.position.y = e[1]
+    #     end.position.z = 1.16
+    #     end.orientation.x = 1
+
+    #     self.go_to_start_point(start)
+
+    #     fraction = 0.0
+    #     maxtries = 100
+    #     attempts = 0 
+    #     MPos_succ = False
+
+    #     # self.print_poses([start, end])
+    #     self.arm.set_start_state_to_current_state()
+
+    #     while fraction < 1.0 and attempts < maxtries:
+    #         (plan, fraction) = self.arm.compute_cartesian_path (
+    #                                 [start, end],
+    #                                 0.01,
+    #                                 0.0,
+    #                                 True)
+    #         attempts += 1         
+
+    #     if fraction == 1.0:
+    #         self.arm.execute(plan)
+    #         MPos_succ = True
+    #         rospy.sleep(0.2)
+    #     else:
+    #         rospy.loginfo("Path planning failed")
+    #     self.init_joint_state()
+    #     return MPos_succ
+
     def push(self, s, e):
         start = Pose()
         end = Pose()
@@ -533,15 +578,24 @@ class RobotSim(object):
         self.arm.set_max_acceleration_scaling_factor(0.8)
         self.arm.set_max_velocity_scaling_factor(1)
 
+        way_points = []
+
         start.position.x = s[0]
         start.position.y = s[1]
-        start.position.z = 1.16
+        start.position.z = 1.36
         start.orientation.x = 1
 
         end.position.x = e[0]
         end.position.y = e[1]
         end.position.z = 1.16
         end.orientation.x = 1
+
+        way_points.append(start)
+        start.position.z -= 0.2
+        way_points.append(start)
+        way_points.append(end)
+        end.position.z += 0.2
+        way_points.append(end)
 
         self.go_to_start_point(start)
 
@@ -555,7 +609,7 @@ class RobotSim(object):
 
         while fraction < 1.0 and attempts < maxtries:
             (plan, fraction) = self.arm.compute_cartesian_path (
-                                    [start, end],
+                                    way_points,
                                     0.01,
                                     0.0,
                                     True)
@@ -655,25 +709,28 @@ class RobotSim(object):
 
     def object_spwan(self):         # x in [0.2, 0.8]  y in [-0.3 0.3]
         # initial all objects, and spwan them to the Gazebo 
-        rospy.wait_for_service("gazebo/spawn_sdf_model",timeout=5)
+        try:
+            rospy.wait_for_service("gazebo/spawn_sdf_model",timeout=5)
 
-        for i in self.object_models:
-            initial_pose = Pose()
-            initial_pose.position.x = np.random.uniform(0.4,0.6)
-            initial_pose.position.y = np.random.uniform(-0.1,0.1)
-            initial_pose.position.z = 1.2
-            
-            initial_orientation = quaternion_from_euler(np.random.uniform(-3.14,3.14), np.random.uniform(-3.14,3.14), np.random.uniform(-3.14,3.14))
-            initial_pose.orientation.x = initial_orientation[0]
-            initial_pose.orientation.y = initial_orientation[1]
-            initial_pose.orientation.z = initial_orientation[2]
-            initial_pose.orientation.w = initial_orientation[3]
+            for i in self.object_models:
+                initial_pose = Pose()
+                initial_pose.position.x = np.random.uniform(0.48, 0.52)
+                initial_pose.position.y = np.random.uniform(-0.07, 0.02)
+                initial_pose.position.z = 1.1
+                
+                initial_orientation = quaternion_from_euler(np.random.uniform(-3.14,3.14), np.random.uniform(-3.14,3.14), np.random.uniform(-3.14,3.14))
+                initial_pose.orientation.x = initial_orientation[0]
+                initial_pose.orientation.y = initial_orientation[1]
+                initial_pose.orientation.z = initial_orientation[2]
+                initial_pose.orientation.w = initial_orientation[3]
 
-            filename = '/home/ljm/.gazebo/models/%s/model.sdf'%(i)
-            with open(filename,"r") as f:
-                reel_xml = f.read()
-            self.spawn(i, reel_xml, "", initial_pose, "world")
-        rospy.sleep(2)
+                filename = '/home/ljm/.gazebo/models/%s/model.sdf'%(i)
+                with open(filename,"r") as f:
+                    reel_xml = f.read()
+                self.spawn(i, reel_xml, "", initial_pose, "world")
+            rospy.sleep(2)
+        except:
+            self.object_spwan()
 
     ######################################################################
     """Convenience method"""

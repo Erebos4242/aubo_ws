@@ -259,20 +259,20 @@ def optimize_model():
 #
 start_time = time.time()
 
-num_episodes = 500
+num_episodes = 10000
 for i_episode in range(num_episodes):
 
     print(f'episode: {i_episode}')
 
     # Initialize the environment and state
     env.reset()
-    state = get_screen()
-    done_step = 0
-    for t in count():
+    for t in range(10):
         # Select and perform an action
+        state = get_screen()
         action = select_action(state)
         done, reward = env.step(action.item())
-        print(f'action: {action.item()}, reward: {reward}')
+        
+        print(f'step: {t}, reward: {reward}')
 
         reward = torch.tensor([reward], device=device)
         
@@ -285,20 +285,18 @@ for i_episode in range(num_episodes):
         # Store the transition in memory
         memory.push(state, action, next_state, reward)
 
-        # Move to the next state
-        state = next_state
-
         # Perform one step of the optimization (on the policy network)
         optimize_model()
-        done_step += 1
-        if done or done_step >= 20:
-            print(f'total step: {done_step}')
+
+        if done:
             break
+    print(f'done step: {t}')
     # Update the target network, copying all weights and biases in DQN
     if i_episode % TARGET_UPDATE == 0:
         target_net.load_state_dict(policy_net.state_dict())
+    if i_episode % 300 == 0:
+        torch.save(target_net.state_dict(), f'/home/ljm/data/saved_net/sac/{i_episode}model.txt')
 
-torch.save(target_net.state_dict(), '/home/ljm/data/saved_net/dqt_push/model.txt')
 
 end_time = time.time()
 print(f'time cost: {end_time - start_time} s')
