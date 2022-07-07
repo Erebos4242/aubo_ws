@@ -38,7 +38,7 @@ Transition = namedtuple('Transition',
 class ReplayMemory(object):
 
     def __init__(self, capacity):
-        self.memory = deque([],maxlen=capacity)
+        self.memory = deque ([],maxlen=capacity)
 
     def push(self, *args):
         """Save a transition"""
@@ -291,6 +291,7 @@ for i_episode in range(num_episodes):
         if done:
             break
     print(f'done step: {t}')
+
     # Update the target network, copying all weights and biases in DQN
     if i_episode % TARGET_UPDATE == 0:
         target_net.load_state_dict(policy_net.state_dict())

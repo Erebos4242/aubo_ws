@@ -91,7 +91,36 @@ class RobotSim(object):
         """global variable"""
         self.init_joint = [1.571, 0, 0, 0, 0, 0]
         self.scene_models = ['ground_plane', 'table_marble', 'kinect', 'background', 'aubo_i5']
-        self.object_models = ['cleaner', 'eraser', 'shampoo', 'chewinggum', 'salt']
+        self.object_models = ['cappuccino',
+                                'chewinggum',
+                                'eraser',
+                                'salt',
+                                'sugar']
+
+        '''
+        all_objects = ['cappuccino', 'chewinggum', 'cleaner', 'cube', 'cup', 'eraser', 'glue', 'milk', 'rice', 'salt', 'shampoo', 
+        'sugar', 'sweetener', 'teagreen', 'teayellow', 'thuna', 'z-froot_loop', 'z_buzz', 'z_camembert', 'z_carrs',
+        'z_coco', 'z_cos', 'z_dior', 'z_gba', 'z_milk1', 'z_orange', 'z_tuna', 'z_wenzen']
+        
+        train_dataset = ['cappuccino',
+                        'chewinggum',
+                        'eraser',
+                        'salt',
+                        'sugar',
+                        'sweetener',
+                        'teayellow',
+                        'z_carrs',
+                        'z_milk1',
+                        'z_orange']
+
+        test_dataset = ['cube',
+                        'teagreen',
+                        'cleaner',
+                        'z_camembert',
+                        'shampoo',
+                        'thuna',
+                        'z_tuna']
+        '''
         self.add_box()
         self.robot_ready = True
         self.robot_init = False
@@ -639,7 +668,7 @@ class RobotSim(object):
             if not if_separate:
                 not_separated_models.add(i)
                 not_separated_models.add(j)
-        
+          
         # delete separated models
         separated_models = set([i for i in range(len(objects))]) - not_separated_models
         rospy.wait_for_service('/gazebo/delete_model', timeout=5)
